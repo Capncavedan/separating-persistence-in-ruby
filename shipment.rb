@@ -52,6 +52,9 @@ class Shipment < ActiveRecord::Base
   end
 
   def send_in_transit_notifications
+    self.users.each do |user|
+      ShipmentMailer.in_transit_notifications(user, self).deliver_now
+    end
   end
 
   def increment_update_count
