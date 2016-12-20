@@ -1,0 +1,10 @@
+%h1 Packages
+
+%table
+  %tbody
+    - @shipments.each do |shipment|
+      %tr
+        %td= shipment.description
+        %td= shipment.eta
+        %td= shipment.last_location
+        %td= shipment.tracking_number
