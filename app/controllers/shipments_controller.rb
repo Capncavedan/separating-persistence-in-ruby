@@ -1,7 +1,7 @@
 class ShipmentsController < ApplicationController
 
   def index
-    @shipments = user.shipments.outstanding.order("updated_at DESC").limit(50)
+    @shipments = Shipments.for_index_page(user).decorate
   end
 
 end
