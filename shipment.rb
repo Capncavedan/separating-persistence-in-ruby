@@ -1,13 +1,10 @@
 class Shipment < ActiveRecord::Base
-  include ActiveMerchant::Shipping
 
-  attr_writer :description
+  include ActiveMerchant::Shipping
 
   validates_presence_of :tracking_number
 
-  has_and_belongs_to_many :users
-
-  has_many :shipment_descriptions, dependent: :destroy
+  belongs_to :user
 
   scope :outstanding, -> { where("state != 'delivered'") }
   scope :delivered, -> { where("state = 'delivered'") }
@@ -34,27 +31,19 @@ class Shipment < ActiveRecord::Base
   end
 
   def send_delivery_notifications
-    self.users.each do |user|
-      ShipmentMailer.delivery_notification(user, self).deliver_now
-    end
+    ShipmentMailer.delivery_notification(self).deliver_now
   end
 
   def send_delivery_exception_notifications
-    self.users.each do |user|
-      ShipmentMailer.delivery_exception_notification(user, self).deliver_now
-    end
+    ShipmentMailer.delivery_exception_notification(self).deliver_now
   end
 
   def send_out_for_delivery_notifications
-    self.users.each do |user|
-      ShipmentMailer.out_for_delivery_notification(user, self).deliver_now
-    end
+    ShipmentMailer.out_for_delivery_notification(self).deliver_now
   end
 
   def send_in_transit_notifications
-    self.users.each do |user|
-      ShipmentMailer.in_transit_notifications(user, self).deliver_now
-    end
+    ShipmentMailer.in_transit_notifications(self).deliver_now
   end
 
   def increment_update_count
@@ -69,37 +58,26 @@ class Shipment < ActiveRecord::Base
     end
   end
 
-  def description_for_user(user)
-    shipment_descriptions.find_by_user_id(user.id).try(:description)
-  end
-
-  def set_description_for_user(description, user)
-    return if description.blank? || user.nil?
-    if d = shipment_descriptions.find_by_user_id(user.id)
-      d.update_attributes description: description
-    else
-      shipment_descriptions.create(user: user, description: description)
-    end
-  end
-
   def delivery_info
     delivered? ? "Delivered at #{self.delivered_at.to_s}" : 'unknown'
   end
 
   def self.create_shipments_from_email(msg)
-    user = User.find_by_tracking_email( msg )
-    TrackingNotice.tracking_numbers_from(msg.body.decoded).each do |tracking_number|
-      shipment = nil
-      if user
-        shipment = user.shipments.find_by_tracking_number(tracking_number.code)
-      end
-      if shipment.nil?
-        shipment = Shipment.create(tracking_number: tracking_number.code, description: msg.subject )
-        user.shipments << shipment if user
-      else
-        shipment.update_attributes description: msg.subject
+    if user = User.find_by_tracking_email(msg)
+      TrackingNotice.tracking_numbers_from(msg.body.decoded).each do |tracking_number|
+        if shipment = user.shipments.find_by_tracking_number(tracking_number.code)
+          shipment.update_attributes description: msg.subject
+        else
+          shipment = user.shipments.create(tracking_number: tracking_number.code, description: msg.subject)
+        end
       end
     end
+  end
+
+  def self.find_or_create_with_tracking_notice(tracking_notice)
+    shipment = where(tracking_number: tracking_notice.code).first
+    return shipment if shipment
+    create tracking_number: tracking_notice.code, carrier: tracking_notice.carrier
   end
 
   def self.update_all
@@ -108,21 +86,6 @@ class Shipment < ActiveRecord::Base
 
   def self.update_outstanding
     self.outstanding.each(&:update_status)
-  end
-
-  def self.monitor_outstanding_items_for_a_time(total_time=3600, idle_time=300)
-    start_time = Time.now.to_i
-    while ((Time.now - start_time).to_i < total_time) do
-      update_outstanding
-      sleep idle_time
-    end
-    true
-  end
-
-  def self.find_or_create_with_tracking_notice(tracking_notice)
-    shipment = where(tracking_number: tracking_notice.code).first
-    return shipment if shipment
-    create tracking_number: tracking_notice.code, carrier: tracking_notice.carrier
   end
 
   def ups_api
